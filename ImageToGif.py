@@ -6,7 +6,7 @@
 import os
 import asyncio
 from PIL import Image, ImageColor
-from telethon.tl.types import DocumentAttributeAnimated, DocumentAttributeVideo, DocumentAttributeFilename
+from telethon.tl.types import DocumentAttributeAnimated, DocumentAttributeFilename
 from .. import loader, utils
 
 @loader.tds
@@ -43,6 +43,11 @@ class ImageToGifMod(loader.Module):
                 "duration",
                 3.0,
                 lambda: "Duration of the output GIF in seconds (for FFmpeg engine)",
+            ),
+            loader.ConfigValue(
+                "gif_delay",
+                10,
+                lambda: "Delay for each frame in milliseconds for the GIF (default 10)",
             ),
         )
 
@@ -114,67 +119,48 @@ class ImageToGifMod(loader.Module):
             await utils.answer(message, self.strings("error").format(str(e)))
             return
 
-        use_ffmpeg = False
-        out_path = None
-
-        # 1. Try to convert using FFmpeg (creates a high-quality, lightweight GIF)
+        out_path = path + ".gif"
         try:
-            temp_img = path + "_proc.png"
-            img.save(temp_img, "PNG")
-
-            out_path = path + ".gif"
-            duration = float(self.config["duration"])
-
-            cmd = [
-                'ffmpeg', '-y',
-                '-loop', '1',
-                '-r', '10',
-                '-i', temp_img,
-                '-t', str(duration),
-                '-vf', 'split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse',
-                out_path
-            ]
-
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            await process.communicate()
-
-            # Cleanup temporary processed image
-            if os.path.exists(temp_img):
-                os.remove(temp_img)
-
-            if process.returncode == 0:
-                use_ffmpeg = True
-        except FileNotFoundError:
-            # FFmpeg is not installed
-            use_ffmpeg = False
-        except Exception:
-            use_ffmpeg = False
-
-        # 2. Fall back to Pillow (creates a looping GIF)
-        if not use_ffmpeg:
-            out_path = path + ".gif"
+            # Get GIF delay from configuration (default 10ms matching ezgif screenshot)
             try:
-                # Save as 2-frame looping GIF to satisfy Telegram's animation checks
-                img.save(
-                    out_path,
-                    format="GIF",
-                    save_all=True,
-                    append_images=[img],
-                    duration=500,
-                    loop=0
-                )
-            except Exception as e:
-                if os.path.exists(path):
-                    try:
-                        os.remove(path)
-                    except Exception:
-                        pass
-                await utils.answer(message, self.strings("error").format(str(e)))
-                return
+                gif_delay = int(self.config["gif_delay"])
+            except Exception:
+                gif_delay = 10
+
+            # Create a copy of the image and modify one pixel slightly to prevent Pillow
+            # from merging/deduplicating consecutive identical frames into a single frame
+            img2 = img.copy()
+            pixel = img2.getpixel((0, 0))
+            if isinstance(pixel, tuple):
+                r, g, b = pixel[:3]
+                new_pixel = (r ^ 1, g, b) + pixel[3:]
+                img2.putpixel((0, 0), new_pixel)
+            elif isinstance(pixel, int):
+                img2.putpixel((0, 0), pixel ^ 1)
+
+            # Save as 2-frame looping GIF matching the ezgif settings:
+            # - 2 frames (duplicated static image with slight pixel variation)
+            # - delay: gif_delay ms (duration=gif_delay)
+            # - loop: loop forever (loop=0)
+            # - disposal: restore to background (disposal=2)
+            img.save(
+                out_path,
+                format="GIF",
+                save_all=True,
+                append_images=[img2],
+                duration=gif_delay,
+                loop=0,
+                disposal=2,
+                optimize=False
+            )
+        except Exception as e:
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
+            await utils.answer(message, self.strings("error").format(str(e)))
+            return
 
         # Send resulting file with appropriate attributes to enable "Save to GIFs"
         try:
