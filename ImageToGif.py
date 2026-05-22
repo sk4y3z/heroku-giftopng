@@ -133,7 +133,7 @@ class ImageToGifMod(loader.Module):
             await utils.answer(message, self.strings("error").format(str(e)))
             return
 
-        out_path = path + ".gif"
+        out_path = None
         use_ffmpeg = False
         temp_mp4 = path + "_temp.mp4"
         temp_img = path + "_proc.png"
@@ -228,6 +228,7 @@ class ImageToGifMod(loader.Module):
                 await process.communicate()
 
                 if process.returncode == 0 and os.path.exists(temp_mp4):
+                    out_path = path + ".mp4"
                     if os.path.exists(out_path):
                         os.remove(out_path)
                     os.rename(temp_mp4, out_path)
@@ -250,6 +251,7 @@ class ImageToGifMod(loader.Module):
         # 2. Fall back to Pillow (creates a looping GIF)
         if not use_ffmpeg:
             try:
+                out_path = path + ".gif"
                 # Update status to warn user that Pillow fallback is used
                 message = await utils.answer(message, self.strings("loading_pillow"))
 
@@ -301,9 +303,6 @@ class ImageToGifMod(loader.Module):
                 reply_to = target_msg.id
 
             file_name = os.path.basename(out_path)
-            if not file_name.lower().endswith('.gif'):
-                file_name = os.path.splitext(file_name)[0] + '.gif'
-
             attrs = [
                 DocumentAttributeAnimated(),
                 DocumentAttributeFilename(file_name=file_name)
