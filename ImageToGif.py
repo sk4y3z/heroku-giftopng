@@ -18,22 +18,22 @@ class ImageToGifMod(loader.Module):
 
     strings = {
         "name": "ImageToGif",
-        "loading": "⚡️ <b>Converting image to GIF...</b>",
-        "loading_pillow": "⚡️ <b>FFmpeg not found. Using Pillow fallback (quality may be lower)...</b>",
-        "no_reply": "⚠️ <b>Please reply to an image, photo, or sticker, or use .togif as a caption!</b>",
-        "not_an_image": "❌ <b>The replied file is not a supported image format!</b>",
-        "error": "❌ <b>An error occurred during conversion:</b> {}",
-        "done": "✅ <b>Successfully converted!</b>",
+        "loading": '<tg-emoji emoji-id="5253464392850221514">🔃</tg-emoji> <b>Converting image to GIF...</b>',
+        "loading_pillow": '<tg-emoji emoji-id="5253864872780769235">❗️</tg-emoji> <b>FFmpeg not found. Using Pillow fallback (quality may be lower)...</b>',
+        "no_reply": '<tg-emoji emoji-id="5258474669769497337">❗️</tg-emoji> <b>Please reply to an image, photo, or sticker, or use .togif as a caption!</b>',
+        "not_an_image": '<tg-emoji emoji-id="5260342697075416641">❌</tg-emoji> <b>The replied file is not a supported image format!</b>',
+        "error": '<tg-emoji emoji-id="5258050709252743821">🖼</tg-emoji> <b>An error occurred during conversion:</b> {}',
+        "done": '<tg-emoji emoji-id="5260726538302660868">✅</tg-emoji> <b>Successfully converted!</b>',
         "_cmd_doc_togif": "Convert a replied image/sticker or captioned image to a saveable GIF",
     }
 
     strings_ru = {
-        "loading": "⚡️ <b>Конвертирую изображение в GIF...</b>",
-        "loading_pillow": "⚡️ <b>FFmpeg не найден. Использую Pillow (качество может быть ниже)...</b>",
-        "no_reply": "⚠️ <b>Пожалуйста, ответьте на изображение, фото или стикер, либо укажите .togif в качестве подписи!</b>",
-        "not_an_image": "❌ <b>Файл не поддерживается или не является изображением!</b>",
-        "error": "❌ <b>Произошла ошибка при конвертации:</b> {}",
-        "done": "✅ <b>Успешно конвертировано!</b>",
+        "loading": '<tg-emoji emoji-id="5253464392850221514">🔃</tg-emoji> <b>Конвертирую изображение в GIF...</b>',
+        "loading_pillow": '<tg-emoji emoji-id="5253864872780769235">❗️</tg-emoji> <b>FFmpeg не найден. Использую Pillow (качество может быть ниже)...</b>',
+        "no_reply": '<tg-emoji emoji-id="5258474669769497337">❗️</tg-emoji> <b>Используйте команду в ответ на изображение или прикрепите его.</b>',
+        "not_an_image": '<tg-emoji emoji-id="5260342697075416641">❌</tg-emoji> <b>Файл не поддерживается или не является изображением!</b>',
+        "error": '<tg-emoji emoji-id="5258050709252743821">🖼</tg-emoji> <b>Произошла ошибка при конвертации:</b> {}',
+        "done": '<tg-emoji emoji-id="5260726538302660868">✅</tg-emoji> <b>Успешно конвертировано!</b>',
         "_cmd_doc_togif": "Конвертировать изображение/стикер в сохраняемую гифку (ответ на медиа или подпись)",
     }
 
