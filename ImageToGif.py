@@ -49,6 +49,16 @@ class ImageToGifMod(loader.Module):
                 10,
                 lambda: "Delay for each frame in milliseconds for the GIF (default 10)",
             ),
+            loader.ConfigValue(
+                "gif_dither",
+                True,
+                lambda: "Use Floyd-Steinberg dithering for smoother gradients (True/False)",
+            ),
+            loader.ConfigValue(
+                "gif_kmeans",
+                3,
+                lambda: "Number of K-Means clustering iterations for higher quality palette (0-20, default 3)",
+            ),
         )
 
     async def client_ready(self, client, db):
@@ -127,10 +137,28 @@ class ImageToGifMod(loader.Module):
             except Exception:
                 gif_delay = 10
 
-            # Convert to P (Palette) mode first, then modify pixel index of a single pixel.
-            # This prevents Pillow's GIF encoder from merging frames if RGB values quantize
-            # to the same palette index in real, multi-color images.
-            img_p1 = img.convert('P', palette=Image.ADAPTIVE)
+            # Get quantization settings
+            try:
+                gif_kmeans = int(self.config["gif_kmeans"])
+            except Exception:
+                gif_kmeans = 3
+
+            try:
+                use_dither = self.config["gif_dither"]
+                if isinstance(use_dither, str):
+                    use_dither = use_dither.lower() in ('true', 'yes', '1')
+                dither_val = Image.Dither.FLOYDSTEINBERG if use_dither else Image.Dither.NONE
+            except Exception:
+                dither_val = Image.Dither.FLOYDSTEINBERG
+
+            # Convert to P (Palette) mode using Median Cut quantization, custom K-Means iterations,
+            # and optional dithering for highest possible quality.
+            img_p1 = img.quantize(
+                colors=256,
+                method=Image.Quantize.MEDIANCUT,
+                kmeans=gif_kmeans,
+                dither=dither_val
+            )
             img_p2 = img_p1.copy()
             orig_index = img_p2.getpixel((0, 0))
             new_index = 0 if orig_index != 0 else 1
