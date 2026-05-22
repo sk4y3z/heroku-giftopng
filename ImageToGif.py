@@ -9,7 +9,7 @@ import asyncio
 import tempfile
 import shutil
 from PIL import Image, ImageColor
-from telethon.tl.types import DocumentAttributeAnimated, DocumentAttributeFilename
+from telethon.tl.types import DocumentAttributeAnimated, DocumentAttributeFilename, DocumentAttributeVideo
 from .. import loader, utils
 
 @loader.tds
@@ -135,8 +135,10 @@ class ImageToGifMod(loader.Module):
             await utils.answer(message, self.strings("error").format(str(e)))
             return
 
-        out_path = path + ".gif"
+        out_path = None
         use_ffmpeg = False
+        temp_mp4 = path + "_temp.mp4"
+        temp_img = path + "_proc.png"
 
         # Parse configurations
         try:
@@ -200,52 +202,56 @@ class ImageToGifMod(loader.Module):
         if use_ffmpeg:
             try:
                 w, h = img.size
+                w_even = max(2, (w // 2) * 2)
+                h_even = max(2, (h // 2) * 2)
 
-                # Create a temporary directory to save the two frames
-                temp_dir = tempfile.mkdtemp()
-                try:
-                    frame1_path = os.path.join(temp_dir, "1.png")
-                    frame2_path = os.path.join(temp_dir, "2.png")
+                img.save(temp_img, "PNG")
 
-                    # Frame 1: original image
-                    img.save(frame1_path, "PNG")
+                cmd = [
+                    ffmpeg_bin, '-y',
+                    '-loop', '1',
+                    '-framerate', '10',
+                    '-i', temp_img,
+                    '-c:v', 'libx264',
+                    '-preset', 'veryfast',
+                    '-crf', '20',
+                    '-t', str(duration),
+                    '-pix_fmt', 'yuv420p',
+                    '-vf', f'scale={w_even}:{h_even}',
+                    '-an',
+                    temp_mp4
+                ]
 
-                    # Frame 2: original image with a 1-pixel color shift
-                    img2 = img.copy()
-                    orig_pixel = img.getpixel((0, 0))
-                    if isinstance(orig_pixel, tuple):
-                        new_pixel = tuple((val + 1) % 256 for val in orig_pixel)
-                    else:
-                        new_pixel = (orig_pixel + 1) % 256
-                    img2.putpixel((0, 0), new_pixel)
-                    img2.save(frame2_path, "PNG")
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                await process.communicate()
 
-                    dither_val = 'floyd_steinberg' if use_dither else 'none'
-                    framerate_val = 1000.0 / max(1, gif_delay)
-
-                    # Generate looping GIF from the two frames
-                    cmd = [
-                        ffmpeg_bin, '-y',
-                        '-framerate', str(framerate_val),
-                        '-i', os.path.join(temp_dir, "%d.png"),
-                        '-vf', f'scale={w}:{h}:flags=lanczos,split[s0][s1];[s0]palettegen=stats_mode=single[p];[s1][p]paletteuse=dither={dither_val}',
-                        '-loop', '0',
-                        out_path
-                    ]
-
-                    process = await asyncio.create_subprocess_exec(
-                        *cmd,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE
-                    )
-                    await process.communicate()
-
-                    if process.returncode != 0 or not os.path.exists(out_path):
-                        use_ffmpeg = False
-                finally:
-                    shutil.rmtree(temp_dir, ignore_errors=True)
+                if process.returncode == 0 and os.path.exists(temp_mp4):
+                    out_path = path + ".mp4"
+                    if os.path.exists(out_path):
+                        try:
+                            os.remove(out_path)
+                        except Exception:
+                            pass
+                    os.rename(temp_mp4, out_path)
+                else:
+                    use_ffmpeg = False
             except Exception:
                 use_ffmpeg = False
+            finally:
+                if os.path.exists(temp_img):
+                    try:
+                        os.remove(temp_img)
+                    except Exception:
+                        pass
+                if os.path.exists(temp_mp4):
+                    try:
+                        os.remove(temp_mp4)
+                    except Exception:
+                        pass
 
         # 2. Fall back to Pillow (creates a looping GIF)
         if not use_ffmpeg:
@@ -306,6 +312,11 @@ class ImageToGifMod(loader.Module):
                 DocumentAttributeAnimated(),
                 DocumentAttributeFilename(file_name=file_name)
             ]
+            if out_path.endswith('.mp4'):
+                w, h = img.size
+                w_even = max(2, (w // 2) * 2)
+                h_even = max(2, (h // 2) * 2)
+                attrs.append(DocumentAttributeVideo(duration=duration, w=w_even, h=h_even, nosound=True))
 
             await self.client.send_file(
                 message.chat_id,
