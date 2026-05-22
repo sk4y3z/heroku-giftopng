@@ -127,27 +127,25 @@ class ImageToGifMod(loader.Module):
             except Exception:
                 gif_delay = 10
 
-            # Create a copy of the image and modify one pixel slightly to prevent Pillow
-            # from merging/deduplicating consecutive identical frames into a single frame
-            img2 = img.copy()
-            pixel = img2.getpixel((0, 0))
-            if isinstance(pixel, tuple):
-                r, g, b = pixel[:3]
-                new_pixel = (r ^ 1, g, b) + pixel[3:]
-                img2.putpixel((0, 0), new_pixel)
-            elif isinstance(pixel, int):
-                img2.putpixel((0, 0), pixel ^ 1)
+            # Convert to P (Palette) mode first, then modify pixel index of a single pixel.
+            # This prevents Pillow's GIF encoder from merging frames if RGB values quantize
+            # to the same palette index in real, multi-color images.
+            img_p1 = img.convert('P', palette=Image.ADAPTIVE)
+            img_p2 = img_p1.copy()
+            orig_index = img_p2.getpixel((0, 0))
+            new_index = 0 if orig_index != 0 else 1
+            img_p2.putpixel((0, 0), new_index)
 
             # Save as 2-frame looping GIF matching the ezgif settings:
-            # - 2 frames (duplicated static image with slight pixel variation)
+            # - 2 frames (duplicated static image with slight pixel index variation)
             # - delay: gif_delay ms (duration=gif_delay)
             # - loop: loop forever (loop=0)
             # - disposal: restore to background (disposal=2)
-            img.save(
+            img_p1.save(
                 out_path,
                 format="GIF",
                 save_all=True,
-                append_images=[img2],
+                append_images=[img_p2],
                 duration=gif_delay,
                 loop=0,
                 disposal=2,
