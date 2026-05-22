@@ -6,7 +6,7 @@
 import os
 import asyncio
 from PIL import Image, ImageColor
-from telethon.tl.types import DocumentAttributeAnimated, DocumentAttributeVideo
+from telethon.tl.types import DocumentAttributeAnimated, DocumentAttributeVideo, DocumentAttributeFilename
 from .. import loader, utils
 
 @loader.tds
@@ -184,44 +184,36 @@ class ImageToGifMod(loader.Module):
                 await utils.answer(message, self.strings("error").format(str(e)))
                 return
 
-        # Send resulting file with DocumentAttributeAnimated to enable "Save to GIFs"
+        # Send resulting file with appropriate attributes to enable "Save to GIFs"
         try:
             # Determine if we should reply to the original message
             reply_to = None
             if target_msg != message:
                 reply_to = target_msg.id
 
-            if use_ffmpeg:
-                # MP4 file - must force document and add video/animated attributes
-                w, h = img.size
-                w = max(2, (w // 2) * 2)
-                h = max(2, (h // 2) * 2)
-                duration_sec = int(float(self.config["duration"]))
+            w, h = img.size
+            w_even = max(2, (w // 2) * 2)
+            h_even = max(2, (h // 2) * 2)
 
-                await self.client.send_file(
-                    message.chat_id,
-                    out_path,
-                    reply_to=reply_to,
-                    force_document=True,
-                    attributes=[
-                        DocumentAttributeAnimated(),
-                        DocumentAttributeVideo(
-                            duration=duration_sec,
-                            w=w,
-                            h=h,
-                            nosound=True,
-                            supports_streaming=True
-                        )
-                    ]
+            attrs = [DocumentAttributeAnimated()]
+            if use_ffmpeg:
+                duration = float(self.config["duration"])
+                attrs.append(
+                    DocumentAttributeVideo(
+                        duration=int(duration),
+                        w=w_even,
+                        h=h_even,
+                        nosound=True
+                    )
                 )
-            else:
-                # Native GIF file - let Telethon handle upload type and add only Animated attribute
-                await self.client.send_file(
-                    message.chat_id,
-                    out_path,
-                    reply_to=reply_to,
-                    attributes=[DocumentAttributeAnimated()]
-                )
+            attrs.append(DocumentAttributeFilename(file_name=os.path.basename(out_path)))
+
+            await self.client.send_file(
+                message.chat_id,
+                out_path,
+                reply_to=reply_to,
+                attributes=attrs
+            )
 
             # Delete the trigger command message
             await message.delete()
