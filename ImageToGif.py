@@ -6,7 +6,7 @@
 import os
 import asyncio
 from PIL import Image, ImageColor
-from telethon.tl.types import DocumentAttributeAnimated
+from telethon.tl.types import DocumentAttributeAnimated, DocumentAttributeVideo
 from .. import loader, utils
 
 @loader.tds
@@ -190,11 +190,28 @@ class ImageToGifMod(loader.Module):
             if target_msg != message:
                 reply_to = target_msg.id
 
+            # Determine dimensions for the document attributes
+            w, h = img.size
+            if use_ffmpeg:
+                w = max(2, (w // 2) * 2)
+                h = max(2, (h // 2) * 2)
+
+            duration_sec = int(float(self.config["duration"])) if use_ffmpeg else 1
+
             await self.client.send_file(
                 message.chat_id,
                 out_path,
                 reply_to=reply_to,
-                attributes=[DocumentAttributeAnimated()]
+                attributes=[
+                    DocumentAttributeAnimated(),
+                    DocumentAttributeVideo(
+                        duration=duration_sec,
+                        w=w,
+                        h=h,
+                        nosound=True,
+                        supports_streaming=True
+                    )
+                ]
             )
             # Delete the trigger command message
             await message.delete()
