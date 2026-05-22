@@ -202,6 +202,7 @@ class ImageToGifMod(loader.Module):
                 message.chat_id,
                 out_path,
                 reply_to=reply_to,
+                force_document=True,
                 attributes=[
                     DocumentAttributeAnimated(),
                     DocumentAttributeVideo(
