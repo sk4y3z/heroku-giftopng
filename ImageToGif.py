@@ -139,6 +139,7 @@ class ImageToGifMod(loader.Module):
                 '-t', str(duration),
                 '-pix_fmt', 'yuv420p',
                 '-vf', f'scale={w_even}:{h_even}',
+                '-movflags', '+faststart',
                 '-an',
                 out_path
             ]
@@ -191,22 +192,14 @@ class ImageToGifMod(loader.Module):
             if target_msg != message:
                 reply_to = target_msg.id
 
-            w, h = img.size
-            w_even = max(2, (w // 2) * 2)
-            h_even = max(2, (h // 2) * 2)
+            file_name = os.path.basename(out_path)
+            if not file_name.lower().endswith('.gif'):
+                file_name = os.path.splitext(file_name)[0] + '.gif'
 
-            attrs = [DocumentAttributeAnimated()]
-            if use_ffmpeg:
-                duration = float(self.config["duration"])
-                attrs.append(
-                    DocumentAttributeVideo(
-                        duration=int(duration),
-                        w=w_even,
-                        h=h_even,
-                        nosound=True
-                    )
-                )
-            attrs.append(DocumentAttributeFilename(file_name=os.path.basename(out_path)))
+            attrs = [
+                DocumentAttributeAnimated(),
+                DocumentAttributeFilename(file_name=file_name)
+            ]
 
             await self.client.send_file(
                 message.chat_id,
