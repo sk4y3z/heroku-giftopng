@@ -41,7 +41,7 @@ class ImageToGifMod(loader.Module):
             ),
             loader.ConfigValue(
                 "duration",
-                1.0,
+                3.0,
                 lambda: "Duration of the output GIF in seconds (for FFmpeg engine)",
             ),
         )
@@ -135,6 +135,7 @@ class ImageToGifMod(loader.Module):
                 '-loop', '1',
                 '-i', temp_img,
                 '-c:v', 'libx264',
+                '-r', '25',
                 '-t', str(duration),
                 '-pix_fmt', 'yuv420p',
                 '-vf', f'scale={w_even}:{h_even}',
@@ -190,30 +191,38 @@ class ImageToGifMod(loader.Module):
             if target_msg != message:
                 reply_to = target_msg.id
 
-            # Determine dimensions for the document attributes
-            w, h = img.size
             if use_ffmpeg:
+                # MP4 file - must force document and add video/animated attributes
+                w, h = img.size
                 w = max(2, (w // 2) * 2)
                 h = max(2, (h // 2) * 2)
+                duration_sec = int(float(self.config["duration"]))
 
-            duration_sec = int(float(self.config["duration"])) if use_ffmpeg else 1
+                await self.client.send_file(
+                    message.chat_id,
+                    out_path,
+                    reply_to=reply_to,
+                    force_document=True,
+                    attributes=[
+                        DocumentAttributeAnimated(),
+                        DocumentAttributeVideo(
+                            duration=duration_sec,
+                            w=w,
+                            h=h,
+                            nosound=True,
+                            supports_streaming=True
+                        )
+                    ]
+                )
+            else:
+                # Native GIF file - let Telethon handle upload type and add only Animated attribute
+                await self.client.send_file(
+                    message.chat_id,
+                    out_path,
+                    reply_to=reply_to,
+                    attributes=[DocumentAttributeAnimated()]
+                )
 
-            await self.client.send_file(
-                message.chat_id,
-                out_path,
-                reply_to=reply_to,
-                force_document=True,
-                attributes=[
-                    DocumentAttributeAnimated(),
-                    DocumentAttributeVideo(
-                        duration=duration_sec,
-                        w=w,
-                        h=h,
-                        nosound=True,
-                        supports_streaming=True
-                    )
-                ]
-            )
             # Delete the trigger command message
             await message.delete()
         except Exception as e:
