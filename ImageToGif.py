@@ -2,6 +2,7 @@
 
 # Save to GIF converter module for Hikka & Friendly-Telegram Userbots
 # Developed by Antigravity
+# requires: imageio-ffmpeg
 
 import os
 import asyncio
@@ -16,6 +17,7 @@ class ImageToGifMod(loader.Module):
     strings = {
         "name": "ImageToGif",
         "loading": "⚡️ <b>Converting image to GIF...</b>",
+        "loading_pillow": "⚡️ <b>FFmpeg not found. Using Pillow fallback (quality may be lower)...</b>",
         "no_reply": "⚠️ <b>Please reply to an image, photo, or sticker, or use .togif as a caption!</b>",
         "not_an_image": "❌ <b>The replied file is not a supported image format!</b>",
         "error": "❌ <b>An error occurred during conversion:</b> {}",
@@ -25,12 +27,14 @@ class ImageToGifMod(loader.Module):
 
     strings_ru = {
         "loading": "⚡️ <b>Конвертирую изображение в GIF...</b>",
+        "loading_pillow": "⚡️ <b>FFmpeg не найден. Использую Pillow (качество может быть ниже)...</b>",
         "no_reply": "⚠️ <b>Пожалуйста, ответьте на изображение, фото или стикер, либо укажите .togif в качестве подписи!</b>",
         "not_an_image": "❌ <b>Файл не поддерживается или не является изображением!</b>",
         "error": "❌ <b>Произошла ошибка при конвертации:</b> {}",
         "done": "✅ <b>Успешно конвертировано!</b>",
         "_cmd_doc_togif": "Конвертировать изображение/стикер в сохраняемую гифку (ответ на медиа или подпись)",
     }
+
 
     def __init__(self):
         self.config = loader.ModuleConfig(
@@ -134,89 +138,120 @@ class ImageToGifMod(loader.Module):
         temp_mp4 = path + "_temp.mp4"
         temp_img = path + "_proc.png"
 
-        # 1. Try to convert using FFmpeg (creates a high-quality, lightweight MP4)
+        # Parse configurations
+        try:
+            max_size = int(self.config["max_size"])
+        except Exception:
+            max_size = 800
+
+        try:
+            gif_delay = int(self.config["gif_delay"])
+        except Exception:
+            gif_delay = 10
+
+        try:
+            use_dither = self.config["dither"]
+            if isinstance(use_dither, str):
+                use_dither = use_dither.lower() in ('true', 'yes', '1')
+        except Exception:
+            use_dither = True
+
         try:
             duration = float(self.config["duration"])
-            w, h = img.size
-            w_even = max(2, (w // 2) * 2)
-            h_even = max(2, (h // 2) * 2)
+        except Exception:
+            duration = 3.0
 
-            img.save(temp_img, "PNG")
+        # Centralized resize logic:
+        # If max_size > 0, resize to max_size.
+        # If max_size == 0, cap at 1920 to prevent encoding/transcoding issues.
+        limit_size = max_size if max_size > 0 else 1920
+        w, h = img.size
+        if max(w, h) > limit_size:
+            try:
+                resample_filter = Image.Resampling.LANCZOS
+            except AttributeError:
+                try:
+                    resample_filter = Image.LANCZOS
+                except AttributeError:
+                    resample_filter = Image.ANTIALIAS
+            img.thumbnail((limit_size, limit_size), resample_filter)
 
-            cmd = [
-                'ffmpeg', '-y',
-                '-loop', '1',
-                '-framerate', '10',
-                '-i', temp_img,
-                '-c:v', 'libx264',
-                '-t', str(duration),
-                '-pix_fmt', 'yuv420p',
-                '-vf', f'scale={w_even}:{h_even}',
-                '-an',
-                temp_mp4
-            ]
+        # 1. Try to convert using FFmpeg (creates a high-quality, lightweight MP4)
+        ffmpeg_bin = 'ffmpeg'
+        try:
+            import imageio_ffmpeg
+            ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception:
+            pass
 
+        try:
+            # Check if ffmpeg works
             process = await asyncio.create_subprocess_exec(
-                *cmd,
+                ffmpeg_bin, '-version',
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
             await process.communicate()
-
-            if process.returncode == 0 and os.path.exists(temp_mp4):
-                # Rename to .gif extension so Telethon uploads it as a document (GIF)
-                # rather than a standard video with seek bars.
-                if os.path.exists(out_path):
-                    os.remove(out_path)
-                os.rename(temp_mp4, out_path)
+            if process.returncode == 0:
                 use_ffmpeg = True
         except Exception:
             use_ffmpeg = False
-        finally:
-            if os.path.exists(temp_img):
-                try:
-                    os.remove(temp_img)
-                except Exception:
-                    pass
-            if os.path.exists(temp_mp4):
-                try:
-                    os.remove(temp_mp4)
-                except Exception:
-                    pass
+
+        if use_ffmpeg:
+            try:
+                w, h = img.size
+                w_even = max(2, (w // 2) * 2)
+                h_even = max(2, (h // 2) * 2)
+
+                img.save(temp_img, "PNG")
+
+                cmd = [
+                    ffmpeg_bin, '-y',
+                    '-loop', '1',
+                    '-framerate', '10',
+                    '-i', temp_img,
+                    '-c:v', 'libx264',
+                    '-preset', 'veryfast',
+                    '-crf', '20',
+                    '-t', str(duration),
+                    '-pix_fmt', 'yuv420p',
+                    '-vf', f'scale={w_even}:{h_even}',
+                    '-an',
+                    temp_mp4
+                ]
+
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                await process.communicate()
+
+                if process.returncode == 0 and os.path.exists(temp_mp4):
+                    if os.path.exists(out_path):
+                        os.remove(out_path)
+                    os.rename(temp_mp4, out_path)
+                else:
+                    use_ffmpeg = False
+            except Exception:
+                use_ffmpeg = False
+            finally:
+                if os.path.exists(temp_img):
+                    try:
+                        os.remove(temp_img)
+                    except Exception:
+                        pass
+                if os.path.exists(temp_mp4):
+                    try:
+                        os.remove(temp_mp4)
+                    except Exception:
+                        pass
 
         # 2. Fall back to Pillow (creates a looping GIF)
         if not use_ffmpeg:
             try:
-                # Get configuration values
-                try:
-                    gif_delay = int(self.config["gif_delay"])
-                except Exception:
-                    gif_delay = 10
-
-                try:
-                    max_size = int(self.config["max_size"])
-                except Exception:
-                    max_size = 800
-
-                try:
-                    use_dither = self.config["dither"]
-                    if isinstance(use_dither, str):
-                        use_dither = use_dither.lower() in ('true', 'yes', '1')
-                except Exception:
-                    use_dither = True
-
-                # Resize image using high-quality resampler before quantization if it's too large
-                if max_size > 0:
-                    w, h = img.size
-                    if max(w, h) > max_size:
-                        try:
-                            resample_filter = Image.Resampling.LANCZOS
-                        except AttributeError:
-                            try:
-                                resample_filter = Image.LANCZOS
-                            except AttributeError:
-                                resample_filter = Image.ANTIALIAS
-                        img.thumbnail((max_size, max_size), resample_filter)
+                # Update status to warn user that Pillow fallback is used
+                message = await utils.answer(message, self.strings("loading_pillow"))
 
                 # Determine dither mode
                 if use_dither:
@@ -239,11 +274,6 @@ class ImageToGifMod(loader.Module):
                 new_index = 0 if orig_index != 0 else 1
                 img_p2.putpixel((0, 0), new_index)
 
-                # Save as 2-frame looping GIF matching the ezgif settings:
-                # - 2 frames (duplicated static image with slight pixel index variation)
-                # - delay: gif_delay ms (duration=gif_delay)
-                # - loop: loop forever (loop=0)
-                # - disposal: restore to background (disposal=2)
                 img_p1.save(
                     out_path,
                     format="GIF",
