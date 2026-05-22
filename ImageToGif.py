@@ -49,6 +49,16 @@ class ImageToGifMod(loader.Module):
                 10,
                 lambda: "Delay for each frame in milliseconds for the GIF (default 10)",
             ),
+            loader.ConfigValue(
+                "max_size",
+                800,
+                lambda: "Maximum width/height of the GIF (0 to disable resizing)",
+            ),
+            loader.ConfigValue(
+                "dither",
+                True,
+                lambda: "Use Floyd-Steinberg dithering for Pillow fallback (True/False)",
+            ),
         )
 
     async def client_ready(self, client, db):
@@ -120,45 +130,138 @@ class ImageToGifMod(loader.Module):
             return
 
         out_path = path + ".gif"
+        use_ffmpeg = False
+        temp_mp4 = path + "_temp.mp4"
+        temp_img = path + "_proc.png"
+
+        # 1. Try to convert using FFmpeg (creates a high-quality, lightweight MP4)
         try:
-            # Get GIF delay from configuration (default 10ms matching ezgif screenshot)
-            try:
-                gif_delay = int(self.config["gif_delay"])
-            except Exception:
-                gif_delay = 10
+            duration = float(self.config["duration"])
+            w, h = img.size
+            w_even = max(2, (w // 2) * 2)
+            h_even = max(2, (h // 2) * 2)
 
-            # Convert to P (Palette) mode first, then modify pixel index of a single pixel.
-            # This prevents Pillow's GIF encoder from merging frames if RGB values quantize
-            # to the same palette index in real, multi-color images.
-            img_p1 = img.convert('P', palette=Image.ADAPTIVE)
-            img_p2 = img_p1.copy()
-            orig_index = img_p2.getpixel((0, 0))
-            new_index = 0 if orig_index != 0 else 1
-            img_p2.putpixel((0, 0), new_index)
+            img.save(temp_img, "PNG")
 
-            # Save as 2-frame looping GIF matching the ezgif settings:
-            # - 2 frames (duplicated static image with slight pixel index variation)
-            # - delay: gif_delay ms (duration=gif_delay)
-            # - loop: loop forever (loop=0)
-            # - disposal: restore to background (disposal=2)
-            img_p1.save(
-                out_path,
-                format="GIF",
-                save_all=True,
-                append_images=[img_p2],
-                duration=gif_delay,
-                loop=0,
-                disposal=2,
-                optimize=False
+            cmd = [
+                'ffmpeg', '-y',
+                '-loop', '1',
+                '-framerate', '10',
+                '-i', temp_img,
+                '-c:v', 'libx264',
+                '-t', str(duration),
+                '-pix_fmt', 'yuv420p',
+                '-vf', f'scale={w_even}:{h_even}',
+                '-an',
+                temp_mp4
+            ]
+
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
             )
-        except Exception as e:
-            if os.path.exists(path):
+            await process.communicate()
+
+            if process.returncode == 0 and os.path.exists(temp_mp4):
+                # Rename to .gif extension so Telethon uploads it as a document (GIF)
+                # rather than a standard video with seek bars.
+                if os.path.exists(out_path):
+                    os.remove(out_path)
+                os.rename(temp_mp4, out_path)
+                use_ffmpeg = True
+        except Exception:
+            use_ffmpeg = False
+        finally:
+            if os.path.exists(temp_img):
                 try:
-                    os.remove(path)
+                    os.remove(temp_img)
                 except Exception:
                     pass
-            await utils.answer(message, self.strings("error").format(str(e)))
-            return
+            if os.path.exists(temp_mp4):
+                try:
+                    os.remove(temp_mp4)
+                except Exception:
+                    pass
+
+        # 2. Fall back to Pillow (creates a looping GIF)
+        if not use_ffmpeg:
+            try:
+                # Get configuration values
+                try:
+                    gif_delay = int(self.config["gif_delay"])
+                except Exception:
+                    gif_delay = 10
+
+                try:
+                    max_size = int(self.config["max_size"])
+                except Exception:
+                    max_size = 800
+
+                try:
+                    use_dither = self.config["dither"]
+                    if isinstance(use_dither, str):
+                        use_dither = use_dither.lower() in ('true', 'yes', '1')
+                except Exception:
+                    use_dither = True
+
+                # Resize image using high-quality resampler before quantization if it's too large
+                if max_size > 0:
+                    w, h = img.size
+                    if max(w, h) > max_size:
+                        try:
+                            resample_filter = Image.Resampling.LANCZOS
+                        except AttributeError:
+                            try:
+                                resample_filter = Image.LANCZOS
+                            except AttributeError:
+                                resample_filter = Image.ANTIALIAS
+                        img.thumbnail((max_size, max_size), resample_filter)
+
+                # Determine dither mode
+                if use_dither:
+                    try:
+                        dither_val = Image.Dither.FLOYDSTEINBERG
+                    except AttributeError:
+                        dither_val = 1
+                else:
+                    try:
+                        dither_val = Image.Dither.NONE
+                    except AttributeError:
+                        dither_val = 0
+
+                # Convert to P (Palette) mode first, then modify pixel index of a single pixel.
+                # This prevents Pillow's GIF encoder from merging frames if RGB values quantize
+                # to the same palette index in real, multi-color images.
+                img_p1 = img.convert('P', palette=Image.ADAPTIVE, dither=dither_val)
+                img_p2 = img_p1.copy()
+                orig_index = img_p2.getpixel((0, 0))
+                new_index = 0 if orig_index != 0 else 1
+                img_p2.putpixel((0, 0), new_index)
+
+                # Save as 2-frame looping GIF matching the ezgif settings:
+                # - 2 frames (duplicated static image with slight pixel index variation)
+                # - delay: gif_delay ms (duration=gif_delay)
+                # - loop: loop forever (loop=0)
+                # - disposal: restore to background (disposal=2)
+                img_p1.save(
+                    out_path,
+                    format="GIF",
+                    save_all=True,
+                    append_images=[img_p2],
+                    duration=gif_delay,
+                    loop=0,
+                    disposal=2,
+                    optimize=False
+                )
+            except Exception as e:
+                if os.path.exists(path):
+                    try:
+                        os.remove(path)
+                    except Exception:
+                        pass
+                await utils.answer(message, self.strings("error").format(str(e)))
+                return
 
         # Send resulting file with appropriate attributes to enable "Save to GIFs"
         try:
@@ -199,3 +302,4 @@ class ImageToGifMod(loader.Module):
                     os.remove(out_path)
                 except Exception:
                     pass
+
