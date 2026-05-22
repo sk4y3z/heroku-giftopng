@@ -117,30 +117,21 @@ class ImageToGifMod(loader.Module):
         use_ffmpeg = False
         out_path = None
 
-        # 1. Try to convert using FFmpeg (creates a high-quality, lightweight MP4)
+        # 1. Try to convert using FFmpeg (creates a high-quality, lightweight GIF)
         try:
-            w, h = img.size
-            # Make dimensions even (H.264 requirement)
-            w_even = max(2, (w // 2) * 2)
-            h_even = max(2, (h // 2) * 2)
-
             temp_img = path + "_proc.png"
             img.save(temp_img, "PNG")
 
-            out_path = path + ".mp4"
+            out_path = path + ".gif"
             duration = float(self.config["duration"])
 
             cmd = [
                 'ffmpeg', '-y',
                 '-loop', '1',
+                '-r', '10',
                 '-i', temp_img,
-                '-c:v', 'libx264',
-                '-r', '25',
                 '-t', str(duration),
-                '-pix_fmt', 'yuv420p',
-                '-vf', f'scale={w_even}:{h_even}',
-                '-movflags', '+faststart',
-                '-an',
+                '-vf', 'split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse',
                 out_path
             ]
 
